@@ -42,11 +42,6 @@ function pick(row: Record<string, string>, field: keyof Course): string {
   return "";
 }
 
-function parsePrice(value: string): number | null {
-  const digits = value.replace(/[^\d]/g, "");
-  return digits ? Number(digits) : null;
-}
-
 // Курсы берутся из knowledge/courses.xlsx при каждом запросе: добавили строку — курс появился, удалили — пропал.
 export const getCourses = cache(async (): Promise<Course[]> => {
   await connection();
@@ -73,7 +68,7 @@ export const getCourses = cache(async (): Promise<Course[]> => {
         title,
         direction: pick(row, "direction") || "Другое",
         duration: pick(row, "duration"),
-        price: parsePrice(pick(row, "price")),
+        price: pick(row, "price"),
         format: pick(row, "format"),
         description: pick(row, "description"),
         program: pick(row, "program")

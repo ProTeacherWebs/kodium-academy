@@ -1,6 +1,6 @@
 import { getClient, retrieve } from "@/lib/knowledge/rag";
 
-const CHAT_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const CHAT_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
 const MAX_MESSAGES = 12;
 const MAX_TEXT = 1000;
 const RATE_LIMIT = 15; // запросов в минуту с одного адреса
