@@ -32,6 +32,7 @@ function limited(ip: string): boolean {
 }
 
 const json = (error: string, status: number) => Response.json({ error }, { status });
+const quotaExceeded = (error: unknown) => (error as { status?: number })?.status === 429;
 
 export async function POST(request: Request) {
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
@@ -48,7 +49,9 @@ export async function POST(request: Request) {
     context = chunks.length > 0 ? chunks.map((c) => c.text).join("\n\n---\n\n") : "(документов в базе знаний нет)";
   } catch (error) {
     console.error("[chat] ошибка поиска по базе знаний:", error);
-    return json("Не удалось обратиться к базе знаний. Попробуйте позже", 502);
+    return quotaExceeded(error)
+      ? json("Ассистент временно недоступен: исчерпан дневной лимит Gemini. Попробуйте позже", 503)
+      : json("Не удалось обратиться к базе знаний. Попробуйте позже", 502);
   }
 
   const contents = messages.map((m, i) => ({
@@ -79,6 +82,8 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("[chat] ошибка Gemini:", error);
-    return json("Ассистент временно недоступен. Попробуйте позже", 502);
+    return quotaExceeded(error)
+      ? json("Ассистент временно недоступен: исчерпан дневной лимит Gemini. Попробуйте позже", 503)
+      : json("Ассистент временно недоступен. Попробуйте позже", 502);
   }
 }

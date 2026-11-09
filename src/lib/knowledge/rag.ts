@@ -9,15 +9,19 @@ const CHUNK_SIZE = 900;
 const CHUNK_OVERLAP = 150;
 const BATCH = 50;
 export const TOP_K = 6;
+// Пока вся база помещается в этот объём, она целиком идёт в запрос без эмбеддингов: ни квот, ни холодного индекса
+const FULL_CONTEXT_CHARS = 60_000;
 
+type Entry = { signature: string; text: string; chunks?: Chunk[] };
 type Index = {
-  files: Map<string, { signature: string; chunks: Chunk[] }>;
+  files: Map<string, Entry>;
   syncing: Promise<void> | null;
+  embedding: Promise<void> | null;
 };
 
 // Индекс живёт только в памяти сервера: ни БД, ни файлов-индексов. Хранится на globalThis, чтобы пережить hot reload.
 const store = globalThis as typeof globalThis & { __ragIndex?: Index };
-const index: Index = (store.__ragIndex ??= { files: new Map(), syncing: null });
+const index: Index = (store.__ragIndex ??= { files: new Map(), syncing: null, embedding: null });
 
 export function getClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -79,28 +83,24 @@ async function embed(texts: string[], taskType: "RETRIEVAL_DOCUMENT" | "RETRIEVA
   return vectors;
 }
 
+// Читает только новые и изменённые файлы
 async function sync(): Promise<void> {
   const files = await listKnowledgeFiles();
   const present = new Set(files.map((f) => f.id));
   for (const id of index.files.keys()) if (!present.has(id)) index.files.delete(id);
 
-  for (const file of files) {
-    if (index.files.get(file.id)?.signature === file.signature) continue;
-    let text: string;
-    try {
-      text = (await file.read()).trim();
-    } catch (error) {
-      console.warn(`[rag] не удалось прочитать ${file.id}:`, error);
-      index.files.delete(file.id);
-      continue;
-    }
-    const pieces = chunkText(text).map((piece) => `[${file.id}]\n${piece}`);
-    const vectors = pieces.length > 0 ? await embed(pieces, "RETRIEVAL_DOCUMENT") : [];
-    index.files.set(file.id, {
-      signature: file.signature,
-      chunks: pieces.map((piece, i) => ({ source: file.id, text: piece, vector: vectors[i] })),
-    });
-  }
+  await Promise.all(
+    files
+      .filter((file) => index.files.get(file.id)?.signature !== file.signature)
+      .map(async (file) => {
+        try {
+          index.files.set(file.id, { signature: file.signature, text: (await file.read()).trim() });
+        } catch (error) {
+          console.warn(`[rag] не удалось прочитать ${file.id}:`, error);
+          index.files.delete(file.id);
+        }
+      }),
+  );
 }
 
 // Один пересчёт за раз: параллельные запросы ждут один и тот же promise.
@@ -111,9 +111,31 @@ async function ensureIndex(): Promise<void> {
   await index.syncing;
 }
 
+// Эмбеддинги нужны только для больших баз и считаются лишь для файлов, у которых их ещё нет
+async function embedMissing(): Promise<void> {
+  for (const [id, entry] of index.files) {
+    if (entry.chunks) continue;
+    const pieces = chunkText(entry.text).map((piece) => `[${id}]
+${piece}`);
+    const vectors = pieces.length > 0 ? await embed(pieces, "RETRIEVAL_DOCUMENT") : [];
+    entry.chunks = pieces.map((piece, i) => ({ source: id, text: piece, vector: vectors[i] }));
+  }
+}
+
 export async function retrieve(question: string, topK = TOP_K): Promise<Chunk[]> {
   await ensureIndex();
-  const all = [...index.files.values()].flatMap((f) => f.chunks);
+  const entries = [...index.files.entries()].filter(([, e]) => e.text);
+  const total = entries.reduce((sum, [, e]) => sum + e.text.length, 0);
+  if (total <= FULL_CONTEXT_CHARS) {
+    return entries.map(([id, e]) => ({ source: id, text: `[${id}]
+${e.text}`, vector: [] }));
+  }
+
+  index.embedding ??= embedMissing().finally(() => {
+    index.embedding = null;
+  });
+  await index.embedding;
+  const all = [...index.files.values()].flatMap((f) => f.chunks ?? []);
   if (all.length === 0) return [];
   const [query] = await embed([question], "RETRIEVAL_QUERY");
   return all
