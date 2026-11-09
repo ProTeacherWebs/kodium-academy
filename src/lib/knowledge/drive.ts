@@ -13,9 +13,25 @@ export const driveConfigured = () =>
 
 type Credentials = { client_email: string; private_key: string };
 
+// Ключ можно задать JSON-строкой (GOOGLE_SERVICE_ACCOUNT_JSON) или путём к файлу (GOOGLE_SERVICE_ACCOUNT_FILE).
+// Если в FILE по ошибке вставлен сам JSON, он тоже принимается. Тексты ошибок не содержат значений переменных: там лежит секрет.
 async function credentials(): Promise<Credentials> {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? (await readFile(process.env.GOOGLE_SERVICE_ACCOUNT_FILE!, "utf-8"));
-  const parsed = JSON.parse(raw) as Partial<Credentials>;
+  const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const file = process.env.GOOGLE_SERVICE_ACCOUNT_FILE;
+  let raw = json ?? file ?? "";
+  if (!json && !raw.trim().startsWith("{")) {
+    try {
+      raw = await readFile(raw, "utf-8");
+    } catch {
+      throw new Error("Не удалось прочитать файл ключа из GOOGLE_SERVICE_ACCOUNT_FILE: на сервере задайте GOOGLE_SERVICE_ACCOUNT_JSON");
+    }
+  }
+  let parsed: Partial<Credentials>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Ключ сервисного аккаунта не является корректным JSON");
+  }
   if (!parsed.client_email || !parsed.private_key) throw new Error("В ключе сервисного аккаунта нет client_email или private_key");
   return { client_email: parsed.client_email, private_key: parsed.private_key };
 }
