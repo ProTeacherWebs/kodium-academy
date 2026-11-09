@@ -15,7 +15,7 @@
 - [x] **Этап 7. Курсы из Excel** — `getCourses()` читает `knowledge/courses.xlsx`; добавили строку — курс появился, удалили — пропал.
 - [x] **Этап 8. RAG-бэкенд (без БД)** — `@google/genai`, `/api/chat`: чтение `knowledge/`, чанки, эмбеддинги в памяти, top-k, ответ Gemini по контексту; подключение к ChatWidget. Нужен `GEMINI_API_KEY` в `.env.local`; ответы Gemini ещё не проверены с реальным ключом.
 - [x] **Этап 9. Форматы файлов** — md/txt/pdf/docx/xlsx в `loadDocuments()`; примеры документов.
-- [ ] **Этап 10. Google Drive** — `loadDocuments()` читает из папки Drive.
+- [x] **Этап 10. Google Drive** — `listKnowledgeFiles()` читает папку Drive через сервисный аккаунт, если заданы `GOOGLE_DRIVE_FOLDER_ID` и ключ; иначе локальная `knowledge/`. Проверено на подставном API, с настоящим Drive ещё нет.
 - [ ] **Этап 11. SEO и деплой** (Vercel).
 
 ## Заменить тестовые данные перед запуском

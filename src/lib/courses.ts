@@ -1,8 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { connection } from "next/server";
 import { cache } from "react";
-import { knowledgeDir } from "./knowledge/documents";
+import { listKnowledgeFiles } from "./knowledge/documents";
 import { type Course } from "./course-format";
 import { readWorkbook } from "./knowledge/xlsx";
 
@@ -48,9 +46,11 @@ export const getCourses = cache(async (): Promise<Course[]> => {
 
   let buffer: Buffer;
   try {
-    buffer = await readFile(path.join(knowledgeDir(), "courses.xlsx"));
+    const file = (await listKnowledgeFiles()).find((f) => f.id.toLowerCase() === "courses.xlsx");
+    if (!file) return [];
+    buffer = await file.buffer();
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.error("[courses] не удалось прочитать courses.xlsx:", error);
+    console.error("[courses] не удалось получить courses.xlsx:", error);
     return [];
   }
 

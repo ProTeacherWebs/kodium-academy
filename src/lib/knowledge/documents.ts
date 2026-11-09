@@ -1,12 +1,14 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { driveConfigured, listDriveFiles } from "./drive";
 import { readWorkbook } from "./xlsx";
 
 // Файл базы знаний. `signature` меняется при изменении файла и нужна, чтобы не пересчитывать эмбеддинги зря.
-// Источник (локальная папка, позже Google Drive) скрыт за listKnowledgeFiles(): остальной код его не знает.
+// Источник — Google Drive, если заданы GOOGLE_DRIVE_FOLDER_ID и ключ сервисного аккаунта, иначе локальная папка.
 export type KnowledgeFile = {
   id: string;
   signature: string;
+  buffer: () => Promise<Buffer>;
   read: () => Promise<string>;
 };
 
@@ -28,9 +30,8 @@ async function walk(dir: string): Promise<string[]> {
   return nested.flat();
 }
 
-async function parse(full: string): Promise<string> {
-  const ext = path.extname(full).toLowerCase();
-  const buffer = await readFile(full);
+async function parse(name: string, buffer: Buffer): Promise<string> {
+  const ext = path.extname(name).toLowerCase();
 
   if (ext === ".md" || ext === ".txt") return buffer.toString("utf-8");
 
@@ -64,7 +65,16 @@ async function parse(full: string): Promise<string> {
   return "";
 }
 
-export async function listKnowledgeFiles(): Promise<KnowledgeFile[]> {
+const supported = (name: string) => {
+  const base = path.basename(name);
+  return SUPPORTED.has(path.extname(base).toLowerCase()) && !base.startsWith(".") && !base.startsWith("~$");
+};
+
+function makeFile(id: string, signature: string, buffer: () => Promise<Buffer>): KnowledgeFile {
+  return { id, signature, buffer, read: async () => parse(id, await buffer()) };
+}
+
+async function listLocalFiles(): Promise<KnowledgeFile[]> {
   const root = knowledgeDir();
   let paths: string[];
   try {
@@ -73,22 +83,18 @@ export async function listKnowledgeFiles(): Promise<KnowledgeFile[]> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-
-  const files = await Promise.all(
-    paths
-      .filter((full) => {
-        const name = path.basename(full);
-        return SUPPORTED.has(path.extname(name).toLowerCase()) && !name.startsWith(".") && !name.startsWith("~$");
-      })
-      .map(async (full): Promise<KnowledgeFile> => {
-        const info = await stat(full);
-        return {
-          id: path.relative(root, full).split(path.sep).join("/"),
-          signature: `${info.size}:${info.mtimeMs}`,
-          read: () => parse(full),
-        };
-      }),
+  return Promise.all(
+    paths.filter(supported).map(async (full) => {
+      const info = await stat(full);
+      return makeFile(path.relative(root, full).split(path.sep).join("/"), `${info.size}:${info.mtimeMs}`, () => readFile(full));
+    }),
   );
+}
+
+export async function listKnowledgeFiles(): Promise<KnowledgeFile[]> {
+  const files = driveConfigured()
+    ? (await listDriveFiles()).filter((f) => supported(f.id)).map((f) => makeFile(f.id, f.signature, f.download))
+    : await listLocalFiles();
   return files.sort((a, b) => a.id.localeCompare(b.id));
 }
 
